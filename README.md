@@ -2,7 +2,7 @@
 
 [![Status](https://img.shields.io/badge/Status-Incubating-blue)]()
 [![Huawei Cloud](https://img.shields.io/badge/Huawei%20Cloud-Samples-red)]()
-[![Scenario](https://img.shields.io/badge/Scenario-deterministic%20operations-success)]()
+[![Scenario](https://img.shields.io/badge/Scenario-application%20intelligence-success)]()
 
 An AI coding agent skill (Cursor / Claude Code / Codex CLI / Huawei CodeArts Snap) for deploying LLM/VL/ASR models to **Huawei Cloud ModelArts** real-time inference on Ascend NPU (Snt9b2 / Atlas A2), using AK/SK signed REST calls — no CLI package required.
 
