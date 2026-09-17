@@ -1,8 +1,10 @@
-# Huawei ModelArts vLLM Deploy — AI Coding Agent Skill
+# modelarts-vllm-ascend-deploy-skill
 
-Deploy LLM/VL/ASR models to **Huawei Cloud ModelArts** real-time inference on Ascend NPU (Snt9b2 / Atlas A2), using AK/SK signed REST calls — no CLI package required.
+[![Status](https://img.shields.io/badge/Status-Incubating-blue)]()
+[![Huawei Cloud](https://img.shields.io/badge/Huawei%20Cloud-Samples-red)]()
+[![Scenario](https://img.shields.io/badge/Scenario-deterministic%20operations-success)]()
 
-Works with **Cursor**, **Claude Code**, **Codex CLI**, and **Huawei CodeArts Snap**.
+An AI coding agent skill (Cursor / Claude Code / Codex CLI / Huawei CodeArts Snap) for deploying LLM/VL/ASR models to **Huawei Cloud ModelArts** real-time inference on Ascend NPU (Snt9b2 / Atlas A2), using AK/SK signed REST calls — no CLI package required.
 
 ## Quick start
 
@@ -17,17 +19,16 @@ Attach the skill in Cursor chat. The `SKILL.md` frontmatter registers it.
 ### Claude Code
 
 ```bash
-# Clone this repo, then open it in Claude Code
-git clone https://github.com/SoraShen/huawei-modelarts-vllm-deploy.git
-cd huawei-modelarts-vllm-deploy
+git clone https://github.com/huaweicloud-samples/modelarts-vllm-ascend-deploy-skill.git
+cd modelarts-vllm-ascend-deploy-skill
 claude  # CLAUDE.md is auto-loaded
 ```
 
 ### Codex CLI
 
 ```bash
-git clone https://github.com/SoraShen/huawei-modelarts-vllm-deploy.git
-cd huawei-modelarts-vllm-deploy
+git clone https://github.com/huaweicloud-samples/modelarts-vllm-ascend-deploy-skill.git
+cd modelarts-vllm-ascend-deploy-skill
 codex  # AGENTS.md is auto-loaded
 ```
 
@@ -75,6 +76,18 @@ export HUAWEI_PROJECT_ID=<modelarts-project-id>
 - Never stores AK/SK, passwords, or tokens in files — all via env vars / session only.
 - No account-specific info (IPs, project IDs, bucket names) in the skill itself.
 
+## Contributing
+
+Please use pull requests and follow the repository review rules.
+
 ## License
 
 MIT
+
+## Maintainers
+
+CODEOWNERS: @SoraShen
+
+## Feedback
+
+Please use GitHub Issues: https://github.com/huaweicloud-samples/modelarts-vllm-ascend-deploy-skill/issues

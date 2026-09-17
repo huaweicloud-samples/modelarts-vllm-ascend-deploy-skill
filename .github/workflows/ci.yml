@@ -1,16 +1,18 @@
-name: ci
+name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  push:
+    branches:
+      - main
 
 jobs:
   ci:
+    name: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Check required files
         run: |
@@ -26,7 +28,7 @@ jobs:
 
       - name: Verify no hardcoded secrets
         run: |
-          if grep -rE '(AK[A-Z0-9]{10,}|sk-[a-zA-Z0-9]{20,}|password\s*=\s*["\x27][^"\x27]+["\x27])' \
+          if grep -rE '(AK[A-Z0-9]{10,}|sk-[a-zA-Z0-9]{20,}|password\s*=\s*["'"'"'][^"'"'"']+["'"'"'])' \
               --include='*.md' --include='*.py' --include='*.sh' --include='*.yml' \
               . ; then
             echo "ERROR: Potential hardcoded secrets found"
