@@ -6,12 +6,14 @@ description: >-
   marks the model unsupported (Whisper ASR, gated HF encoder-decoders), use
   the custom torch_npu runtime instead of vllm serve. Prefer a user-provided
   Kunpeng ARM ECS; never reuse another account's AK/SK, ECS, OBS, or SWR.
-  Use when deploying Qwen/vLLM, Whisper/ASR, SWR/OBS/DEW, or a Kunpeng prep host.
+  Use when deploying Qwen/vLLM, Whisper/ASR, SWR/OBS/DEW, ModelArts agency
+  (委托), or a Kunpeng prep host. Demand AK/SK plus a working OBS+SWR+DEW agency
+  before CreateInferService.
 ---
 
 # Huawei ModelArts vLLM / custom NPU deploy
 
-Ponytail. No orchestrator package. Sign REST with `scripts/huawei_signed.py`. Never commit, echo, or paste SK / ECS passwords / docker login tokens / HF tokens.
+Ponytail. No orchestrator package. Sign REST with `scripts/huawei_signed.py`. Never commit, echo, or paste SK / ECS passwords / docker login tokens / HF tokens. **Exception:** after creating an ECS or resetting its login password (or any resource with a generated login), write the password into this account’s `.env.local` — see §Local secrets. Still never print the value in chat.
 
 Uncertain → ask in Chinese, short, with a recommended option. Do not create or reuse a resource the user did not confirm.
 
@@ -22,8 +24,8 @@ Uncertain → ask in Chinese, short, with a recommended option. Do not create or
 ```bash
 pip -q install huaweicloudsdkkernel
 export HUAWEI_AK=... HUAWEI_SK=... HUAWEI_PROJECT_ID=<modelarts project>
-python scripts/huawei_signed.py GET 'https://modelarts.af-south-1.myhuaweicloud.com/v2/$HUAWEI_PROJECT_ID/services'
-python scripts/huawei_signed.py POST 'https://...' body.json
+python ~/.cursor/skills/huawei-modelarts-vllm-deploy/scripts/huawei_signed.py GET 'https://modelarts.af-south-1.myhuaweicloud.com/v2/$HUAWEI_PROJECT_ID/services'
+python ~/.cursor/skills/huawei-modelarts-vllm-deploy/scripts/huawei_signed.py POST 'https://...' body.json
 ```
 
 IAM projects (ModelArts region and ECS region are often **different**):
@@ -57,16 +59,19 @@ Ask in Chinese. Defaults in **bold**. Block until AK/SK and model name exist.
 | **AK / SK** | env `HUAWEI_AK` `HUAWEI_SK` (or `huawei-ak` / `huawei-sk` in a user-named `.env.local` **for this account**) | Required. Session export only. Wrong-account file → ignore, ask again. |
 | **Model name** | — | HF / ModelScope id, e.g. `Qwen/Qwen3-VL-8B-Instruct` or `Sunbird/asr-whisper-51-african-languages` |
 | **Runtime** | from §0 | `vllm` or `custom`. Do not let the user skip the gate. |
-| **NPU count** | lookup | vLLM: matrix / fallback Qwen3-VL-8B → **1**. Whisper large-v3 (~1.5B) → **1**. |
+| **NPU count** | lookup | Known models first: [references/model-recipes.md](references/model-recipes.md) (Qwen3.8-27B → **2**, Whisper Sunbird → **1**). Else matrix / fallback Qwen3-VL-8B → **1**. |
 | **ModelArts region** | **`af-south-1` 南非** | Option: `ap-southeast-1` 香港. Third region: list flavors first, then ask. |
 | **ECS region** | **`ap-southeast-3` 新加坡** | Option: `ap-southeast-1` 香港 **only if** ListFlavors has Kunpeng/`kc1`/`aarch64`. |
 | **Pool** | **`public`** | `dedicated`: list pools, user picks id. Never `POST /pools`. |
 | **ARM ECS** | user provides | See §2. Always ask first. |
+| **委托** | agent GET, else console | [references/agency.md](references/agency.md). AK/SK alone is not enough. |
 | **HF_TOKEN** | — | Required if gated. Session / ECS env only. |
 
-Then **one recap** (model, runtime + matrix source, NPU, regions, pool, ECS plan). Wait for 点头 before any mutate.
+Intake also say in Chinese: 「除 AK/SK 外，要在 ModelArts 该区域给**这对 AK 的 IAM 用户**开好委托（OBS+SWR+DEW，授权范围=所有资源或包含本次桶）。我可以后台绑定；挂 OBS 角色通常要主账号在控制台做。」
 
-Export AK/SK for this session only. Do not write them into files unless the user already has a named env file and asks.
+Then **one recap** (model, runtime + matrix source, NPU, regions, pool, ECS plan, agency: bound / need console). Wait for 点头 before any mutate.
+
+Export AK/SK for this session only. Do not write AK/SK into a new file. Created-resource passwords **do** go into the existing account `.env.local` (§Local secrets).
 
 ## 2. ARM ECS ladder (never silent pick/create)
 
@@ -74,8 +79,29 @@ Export AK/SK for this session only. Do not write them into files unless the user
 
 1. **User gave IP/auth** → SSH, `uname -m` must be `aarch64`. Use only for download / docker / obsutil. Do not install extras they did not need. Wrong arch → stop, do not fall through to another host.
 2. **User cannot provide** → `ListServers` in the chosen ECS region, keep Kunpeng/`kc1`/`aarch64`. Send name / flavor / EIP. **Wait for them to pick.** Never auto-use a host from a previous chat or another Huawei account.
-3. **List empty** → propose a **small prep VM** (does not run the model): ~2–4 vCPU, 8GB RAM, data disk `max(100, weights_GB * 3 + 40)` GB, EulerOS ARM, pay-per-use. EIP **yes**, bandwidth **100 Mbps**, `chargemode: traffic` (not 5 Mbps). Send flavor / AZ / password. **Wait, then** `POST /v1/{project_id}/cloudservers` on `ecs.{ecs_region}.myhuaweicloud.com`. After ACTIVE: docker + obsutil, data disk mounted.
+3. **List empty** → propose a **small prep VM** (does not run the model): ~2–4 vCPU, 8GB RAM, data disk `max(100, weights_GB * 3 + 40)` GB, EulerOS ARM, pay-per-use. EIP **yes**, bandwidth **100 Mbps**, `chargemode: traffic` (not 5 Mbps). Send flavor / AZ / password. **Wait, then** `POST /v1/{project_id}/cloudservers` on `ecs.{ecs_region}.myhuaweicloud.com`. After ACTIVE: docker + obsutil, data disk mounted. **Immediately upsert** `prep_ecs_*` into this account’s `.env.local` (§Local secrets). Later SSH: read that file; do not ask the user for a password we created.
 4. **Prereqs missing** (no VPC/subnet/SG, no Kunpeng flavor, no ARM image, quota) → stop. List what to open in console. Do **not** create VPC unless the user explicitly says 「可以建」 at this gate.
+
+## Local secrets (`.env.local`)
+
+File = the **same** account `.env.local` already holding this deploy’s AK/SK (e.g. `ASR/.env.local`). Do not invent a second file. Do not commit it. Do not print values.
+
+When **this session creates** an ECS, **or resets** its login password (or any other resource with a generated password / login):
+
+1. Upsert keys immediately (replace if the same host is rebuilt or the password was just reset). Do not delete existing `ak` / `sk` / `rain_ak` / `HF_TOKEN` lines.
+2. One `.env.local` with more than one AK pair: prefix keys with that account stem so they do not overwrite each other (`prep_ecs_password` for the primary `ak`, `rain_prep_ecs_password` for `rain_ak`).
+3. Tell the user only the **path + key names** (Chinese one-liner). Never paste the password.
+4. Later login: read these keys first. Missing / wrong → console reset, then overwrite the same keys.
+
+```
+prep_ecs_name=<server name>
+prep_ecs_id=<server uuid>
+prep_ecs_ip=<eip>
+prep_ecs_user=root
+prep_ecs_password=<adminPass we set>
+```
+
+Same pattern for other created logins (`<resource>_password`). Temporary SWR/docker tokens: do **not** persist. AK/SK/HF token: write only if the user already keeps them in that file.
 
 ## 3. Mutation gates
 
@@ -95,23 +121,21 @@ Ask in Chinese, short, with a recommended option. No confirm → no create API.
 | Item | Decision | Why | User prepares / sees on failure |
 |---|---|---|---|
 | Deploy CLI package | **Skip** | This skill + `huawei_signed.py` is the runner | Nothing |
-| ModelArts agency | **Automate** | `POST /v2/{project_id}/agency` then `POST /v2/{project_id}/authorizations` | GET authorizations first; if missing, create immediately. 403 / no IAM → console checklist below |
+| ModelArts agency | **Bind automate; roles = user** | Bind via ModelArts REST. Granting OBS/SWR/DEW on the IAM agency needs `iam:agencies:*` | [references/agency.md](references/agency.md). GET authorizations for **this** user. IAM 403 / empty-shell / OBS verify fail → console, do not keep PUT |
 | Buy dedicated pool | **Skip** | Prepaid nodes; not a deploy side effect | Console: Running pool, Infer enabled, idle NPU ≥ count; reply name or id. Else public or buy first |
 | Enable ModelArts/OBS/SWR/DEW/ECS in a region | **Skip** | Account-level console; no reliable one-shot REST | Enable those services in **both** regions. On “not enabled”, name the region + service |
 | Small ECS | **Automate after confirm** | CreateServers works | §2. Missing VPC etc. → prep list, no silent create |
 | DEW / SWR login / OBS / service CRUD | **Automate** | AK/SK is enough | Overwrite/create still hits §3 gates |
 
-### Agency (automate)
+### Agency (bind automate; OBS roles usually console)
 
-1. `GET /v2/{project_id}/authorizations`
-2. Empty → `POST /v2/{project_id}/agency` (body can be `{}` → `ma_agency`) then `POST /v2/{project_id}/authorizations` binding that agency to the current user
-3. 403 or IAM denied — tell the user to prepare:
+Full steps, minimum actions, and console copy: [references/agency.md](references/agency.md). Run this **before CreateInferService** (ECS / OBS upload / SWR push may continue).
 
-- 该 ModelArts 区域控制台 → 权限管理 → 一键授权 OBS、SWR、DEW/CSMS
-- IAM 里能看到委托且信任 ModelArts
-- 该区域已开通 OBS / SWR / DEW
-
-Do not continue deploy without a working agency.
+1. `GET /v2/{project_id}/authorizations` — ready bind only if **this** AK’s user has `type=agency`. Another user’s row ≠ ready. Do not bind leftover agencies of other IAM users.
+2. Missing → `POST /v2/{project_id}/agency` then `POST /v2/{project_id}/authorizations` for the **current** `user_id`.
+3. `POST /agency` 403 / IAM `agencies` 403 / `iam:agencies:createAgency` → stop creating the infer service. Paste the console block in agency.md (主账号, 该区域, 添加委托, 勾选 OBS+SWR+DEW 全选, **授权范围=所有资源**).
+4. 200 bind is not OBS-ready. `POST /agency` can create an empty IAM shell. Path verify uses the agency: events `Failed to verify the OBS path. Insufficient permission` while mounts “settled” → stop PUT. Ask them to 查看权限 search **`ListBucket`** and **`GetObject`** (`ListAllMyBuckets` is not enough) and confirm 授权范围 includes the bucket. No SSE-KMS on that bucket.
+5. Chinese one-liner when blocked: 「请用主账号在该 ModelArts 区域 → 权限管理 → 添加委托：对象选这对 AK 的用户，勾选 OBS+SWR+DEW，授权范围选所有资源（或包含本次 OBS 桶）。查看权限里能搜到 ListBucket 和 GetObject 后再叫我。」
 
 ### Dedicated pool (still skip buy)
 
@@ -142,11 +166,13 @@ Stop and say: 「请在控制台开通 {region} 的 {service}，开通后再叫�
 | ECS default | `ap-southeast-3` | Singapore Kunpeng |
 | ECS option | `ap-southeast-1` | Hong Kong Kunpeng **if listed** |
 
-Public Johannesburg flavor that worked: `modelarts.bm.arm.24u.192g.npu.1d910b` (1× Snt9b2). Dedicated: flavor from that pool's `status.resources.available`, not the public SKU blindly.
+Public Johannesburg flavors that worked: `modelarts.bm.arm.24u.192g.npu.1d910b` (1× Snt9b2), `modelarts.bm.arm.48u.384g.npu.2d910b` (2×). Dedicated: flavor from that pool's `status.resources.available`, not the public SKU blindly.
+
+Johannesburg Snt9b2 = Ascend 910B3 = **A2**. A guide's "8× 910B3" is the public inference pool node (`modelarts.bm.npu.arm.8snt9b2.d`), **not** the prep ECS size. Public pool can schedule up to 8 NPUs; dedicated pool + SFS Turbo is optional, not required for the reference Qwen3.8 / Whisper deploys.
 
 ## 6. Pool behavior
 
-**Public:** omit `pool_id`. Compact scheduling. Multiple public-pool services **can** run simultaneously (e.g. 1-card + 2-card + 1-card = 4 NPU across 3 services) — total NPU is the quota, not service count. Multi-NPU public pods have hit missing HCCL rank-table — prefer **1 NPU** unless the model needs TP>1. Upgrade: `max_surge=0%`, `max_unavailable=100%` (stop → PUT version → start). Rolling 25/25 on 4 cards often `FailedScheduling`.
+**Public:** omit `pool_id`. Compact scheduling. Multiple public-pool services **can** run simultaneously (e.g. 1-card + 2-card + 1-card = 4 NPU across 3 services) — total NPU is the quota, not service count. Multi-NPU public pods have hit missing HCCL rank-table — prefer **1 NPU** unless the model needs TP>1. Qwen3.8-27B does: it ran on the public pool at TP 2 (2-card flavor) — [references/model-recipes.md](references/model-recipes.md). Upgrade: `max_surge=0%`, `max_unavailable=100%` (stop → PUT version → start). Rolling 25/25 on 4 cards often `FailedScheduling`.
 
 **Dedicated:** same OBS/SWR/DEW/image/code as public. TP = visible NPUs. Do not apply public-pool rank-table folklore.
 
@@ -155,11 +181,11 @@ Public Johannesburg flavor that worked: `modelarts.bm.arm.24u.192g.npu.1d910b` (
 ```
 - [ ] intake recap accepted (includes runtime)
 - [ ] ARM ECS (provided / user-picked / confirmed create)
-- [ ] agency GET, create if missing
+- [ ] agency: current IAM user bound + user confirmed OBS ListBucket/GetObject (or console 一键授权 done) — [references/agency.md](references/agency.md)
 - [ ] image linux/arm64 in regional SWR
 - [ ] weights OBS folder has config.json at mount root
 - [ ] code script OBS → /code/  (overwrite gated)
-- [ ] DEW secret keys accessKeyId / secretAccessKey
+- [ ] DEW: `GET /secrets/{name}/versions/latest` keys are accessKeyId / secretAccessKey; prefer the deploy AK
 - [ ] service create (public | confirmed pool_id)
 - [ ] API key create + bind
 - [ ] /health then one task probe (chat or transcription)
@@ -172,11 +198,20 @@ SWR **in ModelArts region**, `linux/arm64` only.
 
 **vLLM:** known good base `quay.io/ascend/vllm-ascend:v0.23.0` → `swr.{ma_region}.myhuaweicloud.com/<ns>/<name>:<tag>`.
 
+**Per-model tags / NPU / cmd:** [references/model-recipes.md](references/model-recipes.md). Qwen3.8-27B = `vllm-ascend:qwen3.8-a2` on **2** NPU (TP 2), not v0.23.0. Whisper Sunbird = custom `whisper-custom:v0.23` on **1** NPU.
+
+CreateService v2 `image` = `{"source": "SWR", "swr_path": "..."}`, not a string. Euler docker bridge has no PyPI: `docker run --network host` → `pip install` → `docker commit`.
+
 v0.23: **do not** wrap with v0.9 `serve.sh --enforce-eager` (BackOffStart). MM limits: dotted `--limit-mm-per-prompt.image N` — JSON `'{"image":N}'` can fail argparse.
 
 **custom ASR:** same base for CANN/`torch_npu`. On ARM ECS, `docker build` FROM it, `pip install` transformers accelerate librosa soundfile fastapi uvicorn python-multipart. **CMD must not be `vllm serve`.** Use `bash /code/serve.sh` from [templates/whisper/](templates/whisper/).
 
-SWR login: signed create-authorization (or console long-term login), then `docker push` from the ARM ECS.
+SWR login (verified `af-south-1`; API host is `swr-api.{ma_region}`, not `swr.{ma_region}`):
+
+- Namespace: `POST https://swr-api.{ma_region}.myhuaweicloud.com/v2/manage/namespaces` `{"namespace":"<ns>"}`. 409 = already exists.
+- Temp login: `POST https://swr-api.{ma_region}.myhuaweicloud.com/v2/manage/utils/secret` body `{}`, signed with the deploy AK/SK (`huawei_signed.py`). **Not GET** — GET returns APIGW 404 (method not found).
+- 200 → `{"auths": {"<registry-host>": {"auth": "<base64(user:password)>"}}}`. Decode `auth` → docker user / password. Do not print.
+- `docker login swr.{ma_region}.myhuaweicloud.com` (no `-api`) on the ARM ECS, then push/pull there. Omit the host and docker logs into docker.io instead.
 
 ### Weights + code
 
@@ -196,6 +231,8 @@ SWR login: signed create-authorization (or console long-term login), then `docke
 cd /data/model-dir && dest=obs://bucket/prefix/weight/
 for f in *; do obsutil cp "$f" "$dest$f" -f; done
 ```
+
+`obsutil ls obs://<bucket>` on a **missing** bucket still echoes the name — confirm objects or an error line, not the name.
 
 OBS-to-OBS flatten of an already-nested prefix: `obsutil cp obs://a/b/ obs://a/ -r` is rejected ("source and destination are nested"). Copy per-object instead: list keys under `a/b/b/`, `obsutil cp` each to `a/b/<file>`, then `obsutil rm a/b/b/ -r -f`.
 
@@ -217,14 +254,19 @@ Never default to 5 Mbps. If an existing prep EIP is still 5, PUT the bandwidth t
 
 Public OBS mount: CSMS keys **exactly** `accessKeyId` / `secretAccessKey`. Dedicated: same DEW first (`secret_type=dew`).
 
+After create/reuse, `GET https://kms.{ma_region}.myhuaweicloud.com/v1/{project_id}/secrets/{name}/versions/latest` and print **only key names** + whether `accessKeyId` equals the deploy AK. `?view=true` does not return `secret_string`. Do not reuse a leftover secret named `modelarts` unless that `accessKeyId` can read the **this-account** OBS prefix — swapping the secret name will not fix an agency miss.
+
+`Failed to verify the OBS path. Insufficient permission` (mounts may still "settled"): [references/agency.md](references/agency.md) — agency OBS `ListBucket`/`GetObject` and 授权范围, then DEW key names. Not a nested OBS path. Do not swap leftover `modelarts` secrets to “fix” it.
+
 ### CreateInferService
 
 `POST https://modelarts.{ma_region}.myhuaweicloud.com/v2/{project_id}/services`
 
 - `type`: `REAL_TIME`
 - Public: no `pool_id`. Dedicated: confirmed `pool_id`
-- `unit_configs[0].count` = NPU count
-- **`service_limit.rate_limit` required** or `ModelArts.8037 RateLimit must not be null`: add `"rate_limit": {"num": 200, "unit": "SECONDS"}`
+- v2 body that returned 200: [references/model-recipes.md](references/model-recipes.md#v2-createservice-body-returned-http-200). `image` = `{"source": "SWR", "swr_path": ...}` object, `secret_type` `DEW`, field `flavor`, port 8000
+- NPU count comes from `flavor` (`...npu.1d910b` / `...npu.2d910b`). `unit_configs[0].count` = **1** instance, not the NPU count
+- **`runtime_config.service_limit.rate_limit` required** or `ModelArts.8037 RateLimit must not be null`: add `"rate_limit": {"num": 200, "unit": "SECONDS"}`
 - PUT existing version number → `ModelArts.8031` → bump
 - STOP can take minutes; START after PUT may 400 while already DEPLOYING — poll GET
 - `FailedScheduling` WARNING on public pool is often **transient** — pod retries and schedules within 5-10 min. Do not delete; poll GET until `running_count ≥ 1`.
@@ -267,4 +309,5 @@ Stopping the prep VM: `POST /v1/{project_id}/cloudservers/action` `{ "os-stop": 
 - `POST /pools` as a side effect of deploy
 - Silent use/create of ECS, VPC, bucket, secret, or service
 - Reusing another account's AK/SK, ECS, OBS, SWR, or DEW
-- Printing SK, docker login password, ECS password, or HF token
+- Printing SK, docker login password, ECS password, or HF token (writing them to this account’s `.env.local` is required, not a stop)
+- Retrying CreateInferService/PUT after `Failed to verify the OBS path. Insufficient permission` until the user confirms console OBS `ListBucket`+`GetObject` and 授权范围 (see [references/agency.md](references/agency.md))

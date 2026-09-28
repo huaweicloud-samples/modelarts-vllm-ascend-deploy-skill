@@ -13,12 +13,12 @@ Gated (`gated: auto`): user must accept the HF terms, then on ARM ECS:
 ```bash
 export HF_TOKEN=...   # do not echo
 hf download Sunbird/asr-whisper-51-african-languages --local-dir /data/weight
-# inner folder must contain config.json
-obsutil cp -r -f /data/weight obs://<bucket>/<prefix>/weight/ \
-  -e=https://obs.<ma_region>.myhuaweicloud.com
+# per-file: directory cp -r nests twice (weight/weight/)
+cd /data/weight && dest=obs://<bucket>/<prefix>/weight/
+for f in *; do obsutil cp "$f" "$dest$f" -f -e=https://obs.<ma_region>.myhuaweicloud.com; done
 ```
 
-Mount that prefix at `/weight/`.
+Mount that prefix at `/weight/`. It must contain `config.json` **and `model.safetensors`** at the root — a missing `model.safetensors` is a proven failed deploy.
 
 ## Image
 
@@ -26,11 +26,13 @@ On the same ARM ECS, FROM `quay.io/ascend/vllm-ascend:v0.23.0`, install:
 
 `transformers accelerate librosa soundfile fastapi uvicorn python-multipart`
 
-Push `linux/arm64` to **ModelArts-region** SWR. Container listens on **8000**.
+Euler's docker bridge cannot reach PyPI, so `docker build` pip steps fail. Use `docker run --network host <base> pip install ...`, then `docker commit` that container as `<ns>/whisper-custom:v0.23`.
+
+Push `linux/arm64` to **ModelArts-region** SWR. Container listens on **8000**. Reference tag / flavor / health: [model-recipes.md](model-recipes.md).
 
 ## Code mount
 
-Upload [templates/whisper/](../templates/whisper/) to OBS → `/code/`. Cmd: `bash /code/serve.sh`.
+Upload [templates/whisper/](../templates/whisper/) to OBS → `/code/` (per-file, flat). All three must be there: `serve.sh`, `server.py`, **`language_tokens.py`** (`server.py` imports it; missing it is a proven failed deploy). Cmd: `bash /code/serve.sh`.
 
 `serve.sh` must `python /code/server.py` (or uvicorn). Never call `vllm`.
 

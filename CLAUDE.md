@@ -49,7 +49,7 @@ Ask in Chinese. Defaults in **bold**. Block until AK/SK and model name exist.
 | **AK / SK** | env `HUAWEI_AK` `HUAWEI_SK` (or `huawei-ak` / `huawei-sk` in a user-named `.env.local` **for this account**) | Required. Session export only. Wrong-account file → ignore, ask again. |
 | **Model name** | — | HF / ModelScope id, e.g. `Qwen/Qwen3-VL-8B-Instruct` or `Sunbird/asr-whisper-51-african-languages` |
 | **Runtime** | from §0 | `vllm` or `custom`. Do not let the user skip the gate. |
-| **NPU count** | lookup | vLLM: matrix / fallback Qwen3-VL-8B → **1**. Whisper large-v3 (~1.5B) → **1**. |
+| **NPU count** | lookup | Known models first: [references/model-recipes.md](references/model-recipes.md) (Qwen3.8-27B → **2**, Whisper Sunbird → **1**). Else matrix / fallback Qwen3-VL-8B → **1**. |
 | **ModelArts region** | **`af-south-1` 南非** | Option: `ap-southeast-1` 香港. Third region: list flavors first, then ask. |
 | **ECS region** | **`ap-southeast-3` 新加坡** | Option: `ap-southeast-1` 香港 **only if** ListFlavors has Kunpeng/`kc1`/`aarch64`. |
 | **Pool** | **`public`** | `dedicated`: list pools, user picks id. Never `POST /pools`. |
@@ -134,11 +134,13 @@ Stop and say: 「请在控制台开通 {region} 的 {service}，开通后再叫�
 | ECS default | `ap-southeast-3` | Singapore Kunpeng |
 | ECS option | `ap-southeast-1` | Hong Kong Kunpeng **if listed** |
 
-Public Johannesburg flavor that worked: `modelarts.bm.arm.24u.192g.npu.1d910b` (1× Snt9b2). Dedicated: flavor from that pool's `status.resources.available`, not the public SKU blindly.
+Public Johannesburg flavors that worked: `modelarts.bm.arm.24u.192g.npu.1d910b` (1× Snt9b2), `modelarts.bm.arm.48u.384g.npu.2d910b` (2×). Dedicated: flavor from that pool's `status.resources.available`, not the public SKU blindly.
+
+Johannesburg Snt9b2 = Ascend 910B3 = **A2**. A guide's "8× 910B3" is the public inference pool node (`modelarts.bm.npu.arm.8snt9b2.d`), **not** the prep ECS size. Public pool can schedule up to 8 NPUs; dedicated pool + SFS Turbo is optional, not required for the reference Qwen3.8 / Whisper deploys.
 
 ## 6. Pool behavior
 
-**Public:** omit `pool_id`. Compact scheduling. Multiple public-pool services **can** run simultaneously (e.g. 1-card + 2-card + 1-card = 4 NPU across 3 services) — total NPU is the quota, not service count. Multi-NPU public pods have hit missing HCCL rank-table — prefer **1 NPU** unless the model needs TP>1. Upgrade: `max_surge=0%`, `max_unavailable=100%` (stop → PUT version → start). Rolling 25/25 on 4 cards often `FailedScheduling`.
+**Public:** omit `pool_id`. Compact scheduling. Multiple public-pool services **can** run simultaneously (e.g. 1-card + 2-card + 1-card = 4 NPU across 3 services) — total NPU is the quota, not service count. Multi-NPU public pods have hit missing HCCL rank-table — prefer **1 NPU** unless the model needs TP>1. Qwen3.8-27B does: it ran on the public pool at TP 2 (2-card flavor) — [references/model-recipes.md](references/model-recipes.md). Upgrade: `max_surge=0%`, `max_unavailable=100%` (stop → PUT version → start). Rolling 25/25 on 4 cards often `FailedScheduling`.
 
 **Dedicated:** same OBS/SWR/DEW/image/code as public. TP = visible NPUs. Do not apply public-pool rank-table folklore.
 
@@ -164,6 +166,10 @@ SWR **in ModelArts region**, `linux/arm64` only.
 
 **vLLM:** known good base `quay.io/ascend/vllm-ascend:v0.23.0` → `swr.{ma_region}.myhuaweicloud.com/<ns>/<name>:<tag>`.
 
+**Per-model tags / NPU / cmd:** [references/model-recipes.md](references/model-recipes.md). Qwen3.8-27B = `vllm-ascend:qwen3.8-a2` on **2** NPU (TP 2), not v0.23.0. Whisper Sunbird = custom `whisper-custom:v0.23` on **1** NPU.
+
+CreateService v2 `image` = `{"source": "SWR", "swr_path": "..."}`, not a string. Euler docker bridge has no PyPI: `docker run --network host` → `pip install` → `docker commit`.
+
 v0.23: **do not** wrap with v0.9 `serve.sh --enforce-eager` (BackOffStart). MM limits: dotted `--limit-mm-per-prompt.image N` — JSON `'{"image":N}'` can fail argparse.
 
 **custom ASR:** same base for CANN/`torch_npu`. On ARM ECS, `docker build` FROM it, `pip install` transformers accelerate librosa soundfile fastapi uvicorn python-multipart. **CMD must not be `vllm serve`.** Use `bash /code/serve.sh` from [templates/whisper/](templates/whisper/).
@@ -188,6 +194,8 @@ SWR login: signed create-authorization (or console long-term login), then `docke
 cd /data/model-dir && dest=obs://bucket/prefix/weight/
 for f in *; do obsutil cp "$f" "$dest$f" -f; done
 ```
+
+`obsutil ls obs://<bucket>` on a **missing** bucket still echoes the name — confirm objects or an error line, not the name.
 
 OBS-to-OBS flatten of an already-nested prefix: `obsutil cp obs://a/b/ obs://a/ -r` is rejected ("source and destination are nested"). Copy per-object instead: list keys under `a/b/b/`, `obsutil cp` each to `a/b/<file>`, then `obsutil rm a/b/b/ -r -f`.
 
@@ -215,8 +223,9 @@ Public OBS mount: CSMS keys **exactly** `accessKeyId` / `secretAccessKey`. Dedic
 
 - `type`: `REAL_TIME`
 - Public: no `pool_id`. Dedicated: confirmed `pool_id`
-- `unit_configs[0].count` = NPU count
-- **`service_limit.rate_limit` required** or `ModelArts.8037 RateLimit must not be null`: add `"rate_limit": {"num": 200, "unit": "SECONDS"}`
+- v2 body that returned 200: [references/model-recipes.md](references/model-recipes.md#v2-createservice-body-returned-http-200). `image` = `{"source": "SWR", "swr_path": ...}` object, `secret_type` `DEW`, field `flavor`, port 8000
+- NPU count comes from `flavor` (`...npu.1d910b` / `...npu.2d910b`). `unit_configs[0].count` = **1** instance, not the NPU count
+- **`runtime_config.service_limit.rate_limit` required** or `ModelArts.8037 RateLimit must not be null`: add `"rate_limit": {"num": 200, "unit": "SECONDS"}`
 - PUT existing version number → `ModelArts.8031` → bump
 - STOP can take minutes; START after PUT may 400 while already DEPLOYING — poll GET
 - `FailedScheduling` WARNING on public pool is often **transient** — pod retries and schedules within 5-10 min. Do not delete; poll GET until `running_count ≥ 1`.
