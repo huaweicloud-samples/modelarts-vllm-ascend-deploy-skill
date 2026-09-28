@@ -13,5 +13,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Placeholder check
-        run: echo "CI placeholder passed"
+
+      - name: Check required files
+        run: |
+          for f in SKILL.md README.md LICENSE scripts/huawei_signed.py; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: Missing required file: $f"
+              exit 1
+            fi
+          done
+
+      - name: Verify signer script syntax
+        run: python3 -m py_compile scripts/huawei_signed.py
+
+      - name: Verify no hardcoded secrets
+        run: |
+          if grep -rE '(AK[A-Z0-9]{10,}|sk-[a-zA-Z0-9]{20,}|password\s*=\s*["'"'"'][^"'"'"']+["'"'"'])' \
+              --include='*.md' --include='*.py' --include='*.sh' --include='*.yml' \
+              . ; then
+            echo "ERROR: Potential hardcoded secrets found"
+            exit 1
+          fi
+          echo "No hardcoded secrets detected"
